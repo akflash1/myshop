@@ -13,6 +13,15 @@
         <p>Stock: {{ product.stock }}</p>
         <a href="{% url 'edit_product' product.id %}">Edit</a>
         <a href="{% url 'delete_product' product_id=product.id %}">Delete</a>
+
+        {% if request.user.is_authenticated %}
+          <form action="{% url 'buy_product' product.id %}" method="post">
+            {% csrf_token %}
+            <label for="quantity">Quantity:</label>
+            <input type="number" name="quantity" min="1" max="{{ product.stock }}" required>
+            <button type="submit">Buy</button>
+          </form>
+        {% endif %}
       </li>
     {% endfor %}
   </ul>

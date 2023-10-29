@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Purchase List</h1>
+  <ul>
+    {% for purchase in purchases %}
+      <li>
+        <h2>{{ purchase.product.name }}</h2>
+        <p>{{ purchase.product.description }}</p>
+        <p>Price: {{ purchase.product.price }}</p>
+        <p>Quantity: {{ purchase.quantity }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}
