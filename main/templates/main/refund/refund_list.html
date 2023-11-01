@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>Refunds</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>User</th>
+            <th>Product</th>
+            <th>Quantity</th>
+            <th>Refund Time</th>
+            <th>Action</th>
+        </tr>
+        {% for refund in object_list %}
+            <tr>
+                <td>{{ refund.id }}</td>
+                <td>{{ refund.refund_purchase.user }}</td>
+                <td>{{ refund.refund_purchase.product }}</td>
+                <td>{{ refund.refund_purchase.product_quantity }}</td>
+                <td>{{ refund.refund_time }}</td>
+                <td>
+                    <form method="post" action="{% url 'refund_agree' refund.pk %}">
+                        {% csrf_token %}
+                        <button type="submit">Approve</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endblock %}

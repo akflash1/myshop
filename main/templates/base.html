@@ -14,9 +14,10 @@
                 <li><a href="{% url 'login' %}">Login</a></li>
                 <li><a href="{% url 'registration' %}">Registration</a></li>
                 {% else %}
-                <a href="{% url 'purchase_list' %}">View Purchases</a>
+                <li><a href="{% url 'purchase_list' %}">View Purchases</a></li>
                 <li><a href="{% url 'product_list' %}">View Products</a></li>
                 <li><a href="{% url 'add_product' %}">Add Product</a></li>
+                <li>Wallet: {{ user.wallet }} USD</li>
                 <li><a href="{% url 'logout' %}">Logout</a></li>
                 {% endif %}
             </ul>

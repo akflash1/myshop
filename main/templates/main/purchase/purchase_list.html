@@ -1,15 +1,34 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 
 {% block content %}
-  <h1>Purchase List</h1>
-  <ul>
-    {% for purchase in purchases %}
-      <li>
-        <h2>{{ purchase.product.name }}</h2>
-        <p>{{ purchase.product.description }}</p>
-        <p>Price: {{ purchase.product.price }}</p>
-        <p>Quantity: {{ purchase.quantity }}</p>
-      </li>
+  {% if messages %}
+    <ul class="messages">
+      {% for message in messages %}
+        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <h2>Purchase List</h2>
+  <table>
+    <tr>
+      <th>Product</th>
+      <th>Quantity</th>
+      <th>Purchase Time</th>
+      <th>Action</th>
+    </tr>
+    {% for purchase in object_list %}
+      <tr>
+        <td>{{ purchase.product }}</td>
+        <td>{{ purchase.product_quantity }}</td>
+        <td>{{ purchase.purchase_created }}</td>
+        <td>
+          <form method="post" action="{% url 'create_refund' purchase.id %}">
+            {% csrf_token %}
+            <button type="submit">Return Product</button>
+          </form>
+        </td>
+      </tr>
     {% endfor %}
-  </ul>
+  </table>
 {% endblock %}

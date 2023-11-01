@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <h2>Confirm Refund</h2>
+
+  {% if request.user.is_staff %}
+    <form method="post" action="{% url 'refund_agree' refund.id %}">
+      {% csrf_token %}
+      <button type="submit" name="action" value="agree">Agree</button>
+      <button type="submit" name="action" value="reject">Reject</button>
+    </form>
+  {% else %}
+    <p>The administrator must confirm your refund.</p>
+  {% endif %}
+{% endblock %}

@@ -1,6 +1,14 @@
 from django import forms
-from .models import Product, User
+from django.shortcuts import get_object_or_404, redirect
+from .models import Product, User, Purchase, Refund
 from django.utils.translation import gettext_lazy as _
+
+def RefundForm(request, purchase_id):
+    purchase = get_object_or_404(Purchase, id=purchase_id)
+    if request.method == 'POST':
+        Refund.objects.create(refund_purchase=purchase)
+        return redirect('purchase_list')
+    return redirect('purchase_list')
 
 class ProductForm(forms.ModelForm):
     class Meta:

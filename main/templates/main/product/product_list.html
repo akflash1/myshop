@@ -3,10 +3,13 @@
 {% block title %}Product List{% endblock %}
 
 {% block content %}
-  <h1>Product List</h1>
-  <ul>
+    {% if error_message %}
+        <p>{{ error_message }}</p>
+    {% endif %}
+<h1>Product List</h1>
+<ul>
     {% for product in products %}
-      <li>
+    <li>
         <h2>{{ product.name }}</h2>
         <p>{{ product.description }}</p>
         <p>Price: {{ product.price }}</p>
@@ -15,14 +18,14 @@
         <a href="{% url 'delete_product' product_id=product.id %}">Delete</a>
 
         {% if request.user.is_authenticated %}
-          <form action="{% url 'buy_product' product.id %}" method="post">
+        <form action="{% url 'buy_product' product.id %}" method="post">
             {% csrf_token %}
             <label for="quantity">Quantity:</label>
             <input type="number" name="quantity" min="1" max="{{ product.stock }}" required>
             <button type="submit">Buy</button>
-          </form>
+        </form>
         {% endif %}
-      </li>
+    </li>
     {% endfor %}
-  </ul>
+</ul>
 {% endblock %}

@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <h2>Create Refund</h2>
+  <form method="post" action="{% url 'refund_agree' refund.id %}">
+    {% csrf_token %}
+    <button type="submit">Return Product</button>
+  </form>
+{% endblock %}
