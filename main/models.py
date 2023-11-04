@@ -17,8 +17,8 @@ class Product(models.Model):
 
 
 class Purchase(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_purchases')
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='user_products')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='purchases')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='purchased')
     quantity = models.PositiveIntegerField()
     purchase_time = models.DateTimeField(auto_now_add=True)
 
@@ -27,7 +27,7 @@ class Purchase(models.Model):
 
 
 class Refund(models.Model):
-    refund_purchase = models.OneToOneField(Purchase, on_delete=models.CASCADE)
+    refund_purchase = models.OneToOneField(Purchase, on_delete=models.CASCADE, related_name='refunded')
     refund_time = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

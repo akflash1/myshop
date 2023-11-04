@@ -1,41 +1,63 @@
 from datetime import timezone
 from django.contrib import messages
 from django.contrib.auth import login
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.views import LoginView, LogoutView
+from django.db import transaction
+from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView
-from django.views.generic.edit import FormView
-from .forms import UserCreationForm, ProductForm
+from django.views.generic.edit import FormView, CreateView, DeleteView, UpdateView
+from .forms import ProductForm, RefundForm
 from django.shortcuts import render, redirect, get_object_or_404
 from .models import Product, Purchase, Refund
 from django.utils import timezone
 
 
-class CreateRefund(LoginRequiredMixin, View):
-    def post(self, request, purchase_id):
-        purchase = get_object_or_404(Purchase, pk=purchase_id)
+class AdminRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def handle_no_permission(self):
+        return redirect('login')
+
+
+class CreateRefund(AdminRequiredMixin, CreateView):
+    model = Refund
+    form_class = RefundForm
+    success_url = reverse_lazy('purchase_list')
+
+    def get_form(self, form_class=None):
+        if form_class is None:
+            form_class = self.get_form_class()
+
+        purchase_id = self.kwargs['purchase_id']
+        return form_class(purchase_id=purchase_id, request=self.request, **self.get_form_kwargs())
+
+    def form_valid(self, form):
+        purchase = get_object_or_404(Purchase, pk=self.kwargs['purchase_id'])
 
         if Refund.objects.filter(refund_purchase=purchase).exists():
-            messages.error(request, 'A refund already exists for this purchase.')
-            return redirect('purchase_list')
+            messages.error(self.request, 'A refund already exists for this purchase.')
+            return reverse_lazy('purchase_list')
 
-        time_since_purchase = timezone.localtime(timezone.now()) - purchase.purchase_time
+        time_since_purchase = timezone.now() - purchase.purchase_time
         if time_since_purchase.total_seconds() > 180:
-            messages.error(request, 'The return period has expired.')
-            return redirect('purchase_list')
+            messages.error(self.request, 'The return period has expired.')
+            return reverse_lazy('purchase_list')
 
-        refund = Refund.objects.create(refund_purchase=purchase)
-        return render(request, 'main/refund/confirm_refund.html', {'refund': refund})
+        form.instance.refund_purchase = purchase
+        return super().form_valid(form)
 
 
-class RefundList(LoginRequiredMixin, ListView):
+class RefundList(AdminRequiredMixin, ListView):
     model = Refund
     template_name = 'main/refund/refund_list.html'
 
 
-class RefundAgree(LoginRequiredMixin, View):
+class RefundAgree(AdminRequiredMixin, View):
     def post(self, request, refund_id):
+        print("RefundAgree post method called")
         if not request.user.is_staff:
             messages.error(request, "The administrator must confirm your refund.")
             return redirect('login')
@@ -58,30 +80,39 @@ class RefundAgree(LoginRequiredMixin, View):
         return redirect('refunds')
 
 
-class BuyProduct(LoginRequiredMixin, View):
-    def post(self, request, product_id):
-        product = get_object_or_404(Product, id=product_id)
-        quantity = int(request.POST.get('quantity'))
+class BuyProduct(LoginRequiredMixin, CreateView):
+    model = Purchase
+    fields = ['quantity']
+    success_url = '/product_list/'
+
+    def form_valid(self, form):
+        product = get_object_or_404(Product, id=self.kwargs['product_id'])
+        quantity = form.cleaned_data['quantity']
 
         if product.stock < quantity:
-            return render(request, 'main/product/product_list.html', {'error_message': 'Not enough items in stock.'})
+            return render(self.request, 'main/product/product_list.html',
+                          {'error_message': 'Not enough items in stock.'})
 
-        user = request.user
         total_price = product.price * quantity
 
-        if total_price > request.user.wallet:
-            messages.error(request, "You don't have enough funds for this purchase")
-            return render(request, 'main/product/product_list.html', {'error_message': "You don't have enough money."})
+        if total_price > self.request.user.wallet:
+            messages.error(self.request, "You don't have enough funds for this purchase")
+            return render(self.request, 'main/product/product_list.html',
+                          {'error_message': "You don't have enough money."})
 
-        user.wallet -= total_price
-        user.save()
+        with transaction.atomic():
+            self.request.user.wallet -= total_price
+            self.request.user.save()
 
-        Purchase.objects.create(user=request.user, product=product, quantity=quantity)
+            purchase = form.save(commit=False)
+            purchase.user = self.request.user
+            purchase.product = product
+            purchase.save()
 
-        product.stock -= quantity
-        product.save()
+            product.stock -= quantity
+            product.save()
 
-        return redirect('product_list')
+        return super().form_valid(form)
 
 
 class PurchaseList(LoginRequiredMixin, ListView):
@@ -93,54 +124,28 @@ class PurchaseList(LoginRequiredMixin, ListView):
         return Purchase.objects.filter(user=self.request.user)
 
 
-class DeleteProduct(LoginRequiredMixin, View):
-    def get(self, request, product_id):
+class DeleteProduct(AdminRequiredMixin, DeleteView):
+    model = Product
+    success_url = reverse_lazy('product_list')
+
+    def post(self, request, *args, **kwargs):
         if not request.user.is_staff:
             return redirect('login')
-
-        product = get_object_or_404(Product, pk=product_id)
-        product.delete()
-        return redirect('product_list')
+        return super().post(request, *args, **kwargs)
 
 
-class EditProduct(LoginRequiredMixin, View):
-    def get(self, request, product_id):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        product = get_object_or_404(Product, id=product_id)
-        form = ProductForm(instance=product)
-        return render(request, 'main/product/edit_product.html', {'form': form})
-
-    def post(self, request, product_id):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        product = get_object_or_404(Product, id=product_id)
-        form = ProductForm(request.POST, instance=product)
-        if form.is_valid():
-            form.save()
-            return redirect('product_list')
-        return render(request, 'main/product/edit_product.html', {'form': form})
+class EditProduct(AdminRequiredMixin, UpdateView):
+    model = Product
+    form_class = ProductForm
+    template_name = 'main/product/edit_product.html'
+    success_url = reverse_lazy('product_list')
 
 
-class AddProduct(LoginRequiredMixin, View):
-    def get(self, request):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        form = ProductForm()
-        return render(request, 'main/product/add_product.html', {'form': form})
-
-    def post(self, request):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        form = ProductForm(request.POST)
-        if form.is_valid():
-            form.save()
-            return redirect('product_list')
-        return render(request, 'main/product/add_product.html', {'form': form})
+class AddProduct(AdminRequiredMixin, CreateView):
+    model = Product
+    form_class = ProductForm
+    template_name = 'main/product/add_product.html'
+    success_url = reverse_lazy('product_list')
 
 
 class ProductList(ListView):
@@ -154,13 +159,6 @@ class Login(LoginView):
     success_url = '.'
     next_page = 'home'
 
-    def form_valid(self, form):
-        response = super().form_valid(form)
-        return response
-
-    def form_invalid(self, form):
-        return super().form_invalid(form)
-
 
 class Logout(LogoutView):
     next_page = 'home'
@@ -168,7 +166,6 @@ class Logout(LogoutView):
 
 class Register(FormView):
     template_name = 'main/user/register.html'
-    form_class = UserCreationForm
     success_url = 'home'
 
     def post(self, request, *args, **kwargs):
