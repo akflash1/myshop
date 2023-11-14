@@ -8,10 +8,9 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView
 from django.views.generic.edit import FormView, CreateView, DeleteView, UpdateView
-from .forms import ProductForm, RefundForm
+from .forms import ProductForm, RefundForm, PurchaseForm
 from django.shortcuts import render, redirect, get_object_or_404
 from .models import Product, Purchase, Refund
-from django.utils import timezone
 
 
 class AdminRequiredMixin(UserPassesTestMixin):
@@ -35,19 +34,13 @@ class CreateRefund(AdminRequiredMixin, CreateView):
         return form_class(purchase_id=purchase_id, request=self.request, **self.get_form_kwargs())
 
     def form_valid(self, form):
-        purchase = get_object_or_404(Purchase, pk=self.kwargs['purchase_id'])
+        purchase_id = self.kwargs['purchase_id']
+        purchase = get_object_or_404(Purchase, pk=purchase_id)
 
-        if Refund.objects.filter(refund_purchase=purchase).exists():
-            messages.error(self.request, 'A refund already exists for this purchase.')
-            return reverse_lazy('purchase_list')
-
-        time_since_purchase = timezone.now() - purchase.purchase_time
-        if time_since_purchase.total_seconds() > 180:
-            messages.error(self.request, 'The return period has expired.')
-            return reverse_lazy('purchase_list')
-
-        form.instance.refund_purchase = purchase
-        return super().form_valid(form)
+        refund = form.save(commit=False)
+        refund.refund_purchase = purchase
+        refund.save()
+        return redirect('refund_agree', refund_id=refund.id)
 
 
 class RefundList(AdminRequiredMixin, ListView):
@@ -56,8 +49,13 @@ class RefundList(AdminRequiredMixin, ListView):
 
 
 class RefundAgree(AdminRequiredMixin, View):
+    template_name = 'main/refund/confirm_refund.html'
+
+    def get(self, request, refund_id):
+        refund = get_object_or_404(Refund, pk=refund_id)
+        return render(request, self.template_name, {'refund': refund})
+
     def post(self, request, refund_id):
-        print("RefundAgree post method called")
         if not request.user.is_staff:
             messages.error(request, "The administrator must confirm your refund.")
             return redirect('login')
@@ -82,23 +80,35 @@ class RefundAgree(AdminRequiredMixin, View):
 
 class BuyProduct(LoginRequiredMixin, CreateView):
     model = Purchase
-    fields = ['quantity']
     success_url = '/product_list/'
+    form_class = PurchaseForm
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs.update({
+            'request': self.request,
+            'product': get_object_or_404(Product, id=self.kwargs['product_id']),
+            'user': self.request.user
+        })
+        return kwargs
 
     def form_valid(self, form):
-        product = get_object_or_404(Product, id=self.kwargs['product_id'])
+        product = form.product
         quantity = form.cleaned_data['quantity']
 
-        if product.stock < quantity:
-            return render(self.request, 'main/product/product_list.html',
-                          {'error_message': 'Not enough items in stock.'})
+        if form.errors:
+            return render(self.request, 'main/product/product_list.html', {'form': form})
 
         total_price = product.price * quantity
 
+        if product.stock < quantity:
+            form.add_error('quantity', 'Not enough products in stock.')
+
         if total_price > self.request.user.wallet:
-            messages.error(self.request, "You don't have enough funds for this purchase")
-            return render(self.request, 'main/product/product_list.html',
-                          {'error_message': "You don't have enough money."})
+            form.add_error('quantity', 'Not enough money.')
+
+        if form.errors:
+            return render(self.request, 'main/product/product_list.html', {'form': form})
 
         with transaction.atomic():
             self.request.user.wallet -= total_price
