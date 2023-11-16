@@ -1,90 +1,108 @@
-from datetime import timezone
-from django.contrib import messages
-from django.contrib.auth import login
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.views import LoginView, LogoutView
-from django.views import View
+from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.urls import reverse_lazy
 from django.views.generic import ListView
-from django.views.generic.edit import FormView
-from .forms import UserCreationForm, ProductForm
-from django.shortcuts import render, redirect, get_object_or_404
+from django.views.generic.edit import CreateView, DeleteView, UpdateView
+from .forms import ProductForm, RefundForm, PurchaseForm, UserCreateForm
+from django.shortcuts import get_object_or_404
 from .models import Product, Purchase, Refund
-from django.utils import timezone
 
 
-class CreateRefund(LoginRequiredMixin, View):
-    def post(self, request, purchase_id):
-        purchase = get_object_or_404(Purchase, pk=purchase_id)
+class AdminRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return self.request.user.is_staff
 
-        if Refund.objects.filter(refund_purchase=purchase).exists():
-            messages.error(request, 'A refund already exists for this purchase.')
-            return redirect('purchase_list')
-
-        time_since_purchase = timezone.localtime(timezone.now()) - purchase.purchase_time
-        if time_since_purchase.total_seconds() > 180:
-            messages.error(request, 'The return period has expired.')
-            return redirect('purchase_list')
-
-        refund = Refund.objects.create(refund_purchase=purchase)
-        return render(request, 'main/refund/confirm_refund.html', {'refund': refund})
+    def handle_no_permission(self):
+        return HttpResponseRedirect('login/')
 
 
-class RefundList(LoginRequiredMixin, ListView):
+class RefundCreateView(LoginRequiredMixin, CreateView):
+    model = Refund
+    form_class = RefundForm
+    success_url = reverse_lazy('purchase_list')
+
+    def get_success_url(self):
+        return self.success_url
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs.update({
+            'purchase_id': self.kwargs['purchase_id'],
+            'request': self.request,
+        })
+        return kwargs
+
+    def form_invalid(self, form):
+        return HttpResponseRedirect(self.success_url)
+
+
+class RefundListView(AdminRequiredMixin, ListView):
     model = Refund
     template_name = 'main/refund/refund_list.html'
 
 
-class RefundAgree(LoginRequiredMixin, View):
-    def post(self, request, refund_id):
-        if not request.user.is_staff:
-            messages.error(request, "The administrator must confirm your refund.")
-            return redirect('login')
+class RefundAgreeView(AdminRequiredMixin, DeleteView):
+    template_name = 'main/refund/confirm_refund.html'
+    model = Refund
+    success_url = reverse_lazy('refunds')
 
-        refund = get_object_or_404(Refund, pk=refund_id)
-        action = request.POST.get('action')
+    def form_valid(self, form):
+        if self.object:
+            self.object.refund_purchase.product.stock += self.object.refund_purchase.quantity
+            self.object.refund_purchase.user.wallet += self.object.refund_purchase.quantity * self.object.refund_purchase.product.price
 
-        if action == 'agree':
-            purchase = refund.refund_purchase
+            with transaction.atomic():
+                self.object.refund_purchase.product.save()
+                self.object.refund_purchase.user.save()
+                self.object.refund_purchase.delete()
 
-            product = purchase.product
-            product.stock += purchase.quantity
-            product.save()
-
-            purchase.delete()
-            refund.delete()
-        elif action == 'reject':
-            refund.delete()
-
-        return redirect('refunds')
+        return super().form_valid(form=form)
 
 
-class BuyProduct(LoginRequiredMixin, View):
-    def post(self, request, product_id):
-        product = get_object_or_404(Product, id=product_id)
-        quantity = int(request.POST.get('quantity'))
-
-        if product.stock < quantity:
-            return render(request, 'main/product/product_list.html', {'error_message': 'Not enough items in stock.'})
-
-        user = request.user
-        total_price = product.price * quantity
-
-        if total_price > request.user.wallet:
-            messages.error(request, "You don't have enough funds for this purchase")
-            return render(request, 'main/product/product_list.html', {'error_message': "You don't have enough money."})
-
-        user.wallet -= total_price
-        user.save()
-
-        Purchase.objects.create(user=request.user, product=product, quantity=quantity)
-
-        product.stock -= quantity
-        product.save()
-
-        return redirect('product_list')
+class RefundRejectView(AdminRequiredMixin, DeleteView):
+    model = Refund
+    success_url = reverse_lazy('refunds')
 
 
-class PurchaseList(LoginRequiredMixin, ListView):
+class PurchaseCreateView(LoginRequiredMixin, CreateView):
+    model = Purchase
+    success_url = reverse_lazy('product_list')
+    form_class = PurchaseForm
+    login_url = 'login/'
+    http_method_names = ['post']
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs.update({
+            'request': self.request,
+            'product': get_object_or_404(Product, id=self.kwargs['product_id']),
+            'user': self.request.user
+        })
+        return kwargs
+
+    def form_valid(self, form):
+        purchase = form.save(commit=False)
+        purchase.product = form.product
+        purchase.user = form.user
+
+        total_price = form.product.price * form.cleaned_data['quantity']
+        form.user.wallet -= total_price
+        form.product.stock -= form.cleaned_data['quantity']
+
+        with transaction.atomic():
+            self.request.user.save()
+            purchase.save()
+            form.product.save()
+
+        return super().form_valid(form=form)
+
+    def form_invalid(self, form):
+        return HttpResponseRedirect(self.success_url)
+
+
+class PurchaseListView(LoginRequiredMixin, ListView):
     model = Purchase
     template_name = 'main/purchase/purchase_list.html'
     context_object_name = 'purchases'
@@ -93,89 +111,43 @@ class PurchaseList(LoginRequiredMixin, ListView):
         return Purchase.objects.filter(user=self.request.user)
 
 
-class DeleteProduct(LoginRequiredMixin, View):
-    def get(self, request, product_id):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        product = get_object_or_404(Product, pk=product_id)
-        product.delete()
-        return redirect('product_list')
+class ProductDeleteView(AdminRequiredMixin, DeleteView):
+    model = Product
+    success_url = reverse_lazy('product_list')
 
 
-class EditProduct(LoginRequiredMixin, View):
-    def get(self, request, product_id):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        product = get_object_or_404(Product, id=product_id)
-        form = ProductForm(instance=product)
-        return render(request, 'main/product/edit_product.html', {'form': form})
-
-    def post(self, request, product_id):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        product = get_object_or_404(Product, id=product_id)
-        form = ProductForm(request.POST, instance=product)
-        if form.is_valid():
-            form.save()
-            return redirect('product_list')
-        return render(request, 'main/product/edit_product.html', {'form': form})
+class ProductUpdateView(AdminRequiredMixin, UpdateView):
+    model = Product
+    form_class = ProductForm
+    template_name = 'main/product/edit_product.html'
+    success_url = reverse_lazy('product_list')
 
 
-class AddProduct(LoginRequiredMixin, View):
-    def get(self, request):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        form = ProductForm()
-        return render(request, 'main/product/add_product.html', {'form': form})
-
-    def post(self, request):
-        if not request.user.is_staff:
-            return redirect('login')
-
-        form = ProductForm(request.POST)
-        if form.is_valid():
-            form.save()
-            return redirect('product_list')
-        return render(request, 'main/product/add_product.html', {'form': form})
+class ProductCreateView(AdminRequiredMixin, CreateView):
+    model = Product
+    form_class = ProductForm
+    template_name = 'main/product/add_product.html'
+    success_url = reverse_lazy('product_list')
 
 
 class ProductList(ListView):
     model = Product
     template_name = 'main/product/product_list.html'
     context_object_name = 'products'
+    extra_context = {'purchase_form': PurchaseForm()}
 
 
 class Login(LoginView):
     template_name = 'main/user/login.html'
-    success_url = '.'
+    success_url = '/'
     next_page = 'home'
-
-    def form_valid(self, form):
-        response = super().form_valid(form)
-        return response
-
-    def form_invalid(self, form):
-        return super().form_invalid(form)
 
 
 class Logout(LogoutView):
     next_page = 'home'
 
 
-class Register(FormView):
+class Register(CreateView):
     template_name = 'main/user/register.html'
-    form_class = UserCreationForm
-    success_url = 'home'
-
-    def post(self, request, *args, **kwargs):
-        form = self.get_form()
-        if form.is_valid():
-            user = form.save()
-            login(request, user)
-            return redirect(self.success_url)
-        else:
-            return self.form_invalid(form)
+    success_url = reverse_lazy('home')
+    form_class = UserCreateForm

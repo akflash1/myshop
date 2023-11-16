@@ -19,11 +19,11 @@
     </tr>
     {% for purchase in object_list %}
       <tr>
-        <td>{{ purchase.product }}</td>
-        <td>{{ purchase.product_quantity }}</td>
-        <td>{{ purchase.purchase_created }}</td>
+        <td>{{ purchase.product.name}}</td>
+        <td>{{ purchase.quantity }}</td>
+        <td>{{ purchase.purchase_time}}</td>
         <td>
-          <form method="post" action="{% url 'create_refund' purchase.id %}">
+          <form method="post" action="{% url 'create_refund' purchase_id=purchase.pk %}">
             {% csrf_token %}
             <button type="submit">Return Product</button>
           </form>

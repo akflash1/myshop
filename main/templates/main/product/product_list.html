@@ -3,9 +3,9 @@
 {% block title %}Product List{% endblock %}
 
 {% block content %}
-    {% if error_message %}
-        <p>{{ error_message }}</p>
-    {% endif %}
+{% if error_message %}
+<p>{{ error_message }}</p>
+{% endif %}
 <h1>Product List</h1>
 <ul>
     {% for product in products %}
@@ -20,8 +20,7 @@
         {% if request.user.is_authenticated %}
         <form action="{% url 'buy_product' product.id %}" method="post">
             {% csrf_token %}
-            <label for="quantity">Quantity:</label>
-            <input type="number" name="quantity" min="1" max="{{ product.stock }}" required>
+            {{purchase_form}}
             <button type="submit">Buy</button>
         </form>
         {% endif %}
