@@ -125,3 +125,5 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'main.User'
 LOGIN_URL = '/login/'
 
+REFUND_LIMIT_TIME = 60 * 3
+

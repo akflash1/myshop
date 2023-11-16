@@ -31,4 +31,4 @@ class Refund(models.Model):
     refund_time = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Refund for purchase {self.refund_purchase.id}"
+        return f"Refund for purchase {self.refund_purchase.pk}"
